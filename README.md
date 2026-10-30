@@ -1,5 +1,7 @@
 # AntiCrawlKit
 
+**English** | [简体中文](README.zh-CN.md)
+
 Four local instruments for the "the site fights back" half of browser automation:
 
 | Instrument | Question it answers |
@@ -44,7 +46,7 @@ AntiCrawlKit/
 |  +- lib/cdp.mjs           # minimal CDP client (target list, attach, evaluate)
 |  +- fingerprint/
 |  |  +- probe.mjs          # in-page snapshot collector (injected source string)
-|  |  +- audit.mjs          # 26 rules -> verdict + findings + remediation
+|  |  +- audit.mjs          # 25 rules -> verdict + findings + remediation
 |  +- webcrack/
 |  |  +- detect.mjs         # technique detection + metrics + next steps
 |  |  +- strings.mjs        # string tables, decoder wrappers, rotation, blobs
