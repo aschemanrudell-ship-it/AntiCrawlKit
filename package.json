@@ -1,0 +1,8 @@
+{
+  "name": "anticrawlkit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted anti-anti-bot toolkit: browser fingerprint audit, JS deobfuscation, CDP captcha slider solver, adaptive rate limiter - all local, zero runtime deps",
+  "type": "module",
+  "scripts": { "start": "node src/index.js", "test": "node --test" }
+}

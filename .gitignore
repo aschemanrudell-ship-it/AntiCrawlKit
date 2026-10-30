@@ -1,0 +1,1 @@
+# Dependencies node_modules/  # Build output dist/ build/ coverage/  # Local env .env .env.local  # Scratch space work/ *.log
