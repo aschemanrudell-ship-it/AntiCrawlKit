@@ -76,5 +76,5 @@ host limiter recovery, token-bucket serialisation.
 - **No real slider challenge was solved.** `slider` was verified against
   synthetic PNGs generated in `tests/helpers/png.mjs`; `solve.mjs`'s CDP drag
   was not driven against a live target.
-- `verify-ai-project` result is recorded separately in `..\PROJECTS.md`; it is a
+- `verify-ai-project` result (21 pass, 0 warn, 0 fail) is recorded separately in `..\PROJECTS.md`; it is a
   structural check, not a behavioural one.
