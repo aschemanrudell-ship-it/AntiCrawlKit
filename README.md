@@ -12,6 +12,14 @@ Four local instruments for the "the site fights back" half of browser automation
 Everything runs on the box. No network services, no telemetry, **no runtime
 dependencies** — only Node's own `WebSocket`, `fetch`, `node:zlib` and `node:vm`.
 
+```bash
+git clone https://github.com/aschemanrudell-ship-it/AntiCrawlKit.git
+cd AntiCrawlKit
+node --version          # >= 22
+node src/cli.mjs doctor # 6 capability checks
+node --test             # 100 offline tests
+```
+
 ## Goal
 
 Replace the guesswork in scraping and browser automation with measurements:
