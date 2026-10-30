@@ -4,5 +4,14 @@
   "private": true,
   "description": "Self-hosted anti-anti-bot toolkit: browser fingerprint audit, JS deobfuscation, CDP captcha slider solver, adaptive rate limiter - all local, zero runtime deps",
   "type": "module",
-  "scripts": { "start": "node src/index.js", "test": "node --test" }
+  "main": "src/index.js",
+  "bin": { "anticrawl": "src/cli.mjs" },
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "start": "node src/index.js",
+    "cli": "node src/cli.mjs",
+    "test": "node --test",
+    "selftest": "node src/cli.mjs selftest",
+    "doctor": "node src/cli.mjs doctor"
+  }
 }

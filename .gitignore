@@ -1,1 +1,24 @@
-# Dependencies node_modules/  # Build output dist/ build/ coverage/  # Local env .env .env.local  # Scratch space work/ *.log
+# dependencies
+node_modules/
+
+# build output
+dist/
+build/
+coverage/
+
+# local env
+.env
+.env.local
+.env.*
+
+# scratch space (rule: project-local work dir, cleared after each task)
+work/
+.tmp/
+
+# run artifacts
+captures/
+*.log
+
+# captured screenshots / slides stay out of git unless curated into docs
+*.png
+!docs/**/*.png
