@@ -22,3 +22,6 @@ captures/
 # captured screenshots / slides stay out of git unless curated into docs
 *.png
 !docs/**/*.png
+
+# demo fixtures are curated, keep them
+!demo/**/*.png

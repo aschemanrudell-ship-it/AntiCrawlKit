@@ -2,28 +2,176 @@
 
 [English](README.md) | **简体中文**
 
-浏览器自动化里“站点开始反击”那半边，需要四件本地工具：
+站点开始反击了：页面认定你是机器人、丢给你一张滑块、或者干脆回你 `429`。AntiCrawlKit 是四个本地命令，把"猜"换成"测" —— 到底是**哪几个**信号露了你、这段混淆 JS 在**干什么**、缺口在**哪一列**、**多快**会被限流。
 
-| 工具 | 它回答的问题 |
-|---|---|
-| `fingerprint` | 这个页面凭什么认定我是机器人？ |
-| `webcrack` | 这个文件对自己做了什么手脚，能不能还原？ |
-| `slider` | 缺口在哪，怎么拖得像人？ |
-| `rate` | 多快会被限流，被限了怎么退？ |
+没有网络服务，没有遥测，**零运行时依赖**。全部在本机用 Node 自带的 `WebSocket`、`fetch`、`node:zlib`、`node:vm` 跑。
 
-全部在本机跑。无网络服务、无遥测、**零运行时依赖** —— 只用 Node 自带的 `WebSocket`、`fetch`、`node:zlib` 和 `node:vm`。
+| 我遇到的情况 | 用哪个命令 | 拿回来什么 |
+|---|---|---|
+| 页面认定我是机器人 | `fingerprint` | 命中的规则（如 `headless-ua`）、0–100 评分、每条规则的修法 |
+| 这个文件藏了什么 | `detect`、`deobf` | 识别出的手法 + 指标，以及还原后的可读代码 |
+| 滑块怎么都拖不过去 | `slider`、`track` | 缺口列号与宽度，以及带真实时间节奏的拖动轨迹 |
+| 一直吃 429 | `rate` | 按主机自适应的速率：被限就降，连续成功就升 |
+
+## 它到底能干什么 —— 下面是真跑出来的输出，不是示意图
+
+### 1. 审计一个页面：我是哪个信号露的？
+
+把工具指向你**自己**带调试端口启动的 Chrome（`--remote-debugging-port`）。它通过 CDP 附加，在页内采集约 40 个信号，用 25 条规则打分。
+
+```console
+$ node src/cli.mjs fingerprint --expect-timezone Asia/Shanghai
+target      about:blank
+url         about:blank
+verdict     obviously-automated
+likelihood  52/100
+counts      critical=1 warn=2 info=0
+
+[critical] headless-ua - UA advertises HeadlessChrome
+         fix: Launch with a real UI (headless: false) or set a full desktop UA
+              via Network.setUserAgentOverride plus matching client hints.
+[warn] canvas-unstable - Canvas fingerprint is not stable between two draws
+         fix: Expected only when the page injects canvas noise. If you did not
+              opt into noise, something is rewriting toDataURL.
+[warn] missing-device-memory - navigator.deviceMemory is missing on a Chrome UA
+         fix: deviceMemory is present on real Chrome (8 by default). Restore it
+              in an init script if a stealth patch deleted it.
+```
+
+这是对 `Chrome/156.0.8078.73 --headless=new` 的真实运行结果。换成有头窗口，通常会落到 `plausibly-human` —— 两次运行之间的差异，正好就是你要修的东西。`--json` 会吐出完整快照，方便改动前后对比。
+
+### 2. 读懂混淆 JS：这个文件到底在干什么？
+
+```console
+$ node src/cli.mjs detect demo/obfuscated.js
+verdict   obfuscated (score 22/100)
+size      374 bytes, 7 lines, longest line 130
+literals  6 strings, 0 eval, 0 Function()
+
+[high] string-array - String-array obfuscation (_0x… identifiers)
+         string table `_0x1f2a` with index access
+
+next steps:
+  - run `anticrawl deobf <file>` to inline the string array (decoder wrappers included)
+```
+
+然后把它还原 —— 包括**解码包装函数**，这是大多数工具漏掉的部分：
+
+```console
+$ node src/cli.mjs deobf demo/obfuscated.js
+in   obfuscated (22)
+out  obfuscated (22)
+
+stages:
+  string-array-inline  {"arrays":1,"references":4,"decoded":4,
+                        "decoders":[{"name":"_0x9c","array":"_0x1f2a","offset":0}],
+                        "rotated":[],"pruned":[]}
+  strip-debugger  {"removed":1}
+  pretty  {"lines":22}
+--- output ---
+console.log("hello"+"world");
+console["log"]("spam");
+```
+
+`_0x9c(i)` 这层包装函数被换成了它的值，`debugger` 陷阱变成普通注释，轮转 IIFE 还留着 —— 你可以继续看，也可以 `--prune` 掉。
+
+### 3. 滑块验证码：缺口在哪？
+
+喂它一张背景图 PNG。不用浏览器，不联网 —— 纯像素运算。
+
+```console
+$ node src/cli.mjs slider demo/bg.png
+method   edges
+position x=120 width=29
+score    290.888
+image    360x180
+
+candidates:
+  x=120 w=29 score=290.888
+  x=120 w=30 score=290.7014
+  x=119 w=30 score=290.544
+```
+
+那张合成图的真值是 `x=120, w=30` —— 列号正确，宽度差 1 px，这就是文档里写的"硬台阶边缘 ±1 px"。接着生成轨迹：
+
+```console
+$ node src/cli.mjs track --distance 137 --seed 42
+{ "distance": 137, "durationMs": 457, "moves": 52, "overshoot": 1,
+  "wallClockMs": 460, "points": [ { "x": 1, "y": -2, "dt": 7 }, … ] }
+```
+
+`points` 是 `{dx, dy, dt}`，直接用 `Input.dispatchMouseEvent` 回放；轨迹含过冲与回落，不是到点即停。
+
+### 4. 控速：多快会被限流？
+
+```console
+$ node src/cli.mjs rate
+bucket: rate=2/s burst=2 (fake clock, jitter off for readability)
+  take #1: waited 0ms, clock=0ms
+  take #3: waited 500ms, clock=500ms
+
+adaptive host limiter:
+  start rate 2/s (ceiling 2, recoverAfter 3)
+  HTTP 200 -> hold     2.00/s
+  HTTP 429 -> decrease 1.00/s
+  HTTP 429 -> decrease 0.50/s
+```
+
+`429/503/403/412/420` 减半；`401/404/410` 只保持不动（请求本身错了，不是被限流）；连续成功后再逐步爬升。
+
+## 五分钟跑通
 
 ```bash
 git clone https://github.com/aschemanrudell-ship-it/AntiCrawlKit.git
 cd AntiCrawlKit
-node --version          # 需要 >= 22
-node src/cli.mjs doctor # 6 项能力自检
-node --test             # 100 个离线测试
+node --version              # 必须 >= 22
+node src/cli.mjs doctor     # 6 项能力自检
+node --test                 # 100 个离线测试，约 0.5 秒
 ```
 
-## 目标
+先试不需要联网的两半：
 
-把爬虫与浏览器自动化里的“猜”换成“测”：审计活页面上的自动化痕迹、还原对你做指纹的 JS、离线解图片拖动验证码、用自适应限流控制请求节奏。重点不是**伪装**成人，而是**知道**自己哪几个信号不像人，从源头修掉（有头窗口、真 GPU、诚实的 UA）。
+```bash
+node src/cli.mjs detect demo/obfuscated.js      # 样本用了哪些手法
+node src/cli.mjs deobf  demo/obfuscated.js      # 还原出来的代码
+```
+
+再试需要你自己浏览器的那个 —— 工具不会替你启动 Chrome：
+
+```bash
+chrome --remote-debugging-port=9222 --user-data-dir=/tmp/cdp-profile
+node src/cli.mjs fingerprint                    # 默认连 127.0.0.1:9222
+```
+
+看 findings，只修真正成立的那几条，重跑，用 `--json` 对比。这个循环就是全部用法。
+
+## 当作 Agent 技能用
+
+`skill/SKILL.md` 是一份写好的技能定义（YAML front matter + 四套 workflow + 规则），让编码 Agent 直接用这套工具，而不是每次从零手搓。里面写清了命令、执行顺序和坑（±1 px、`--rotate` 会执行代码、不要只修单个信号）。
+
+技能加载后 Agent 拿到什么：
+
+- **触发条件** —— 声明了 `whenToUse`：反爬信号、指纹泄漏、混淆 JS、滑块验证码、429/403 限流。普通无对抗的抓取不该加载它。
+- **Workflow A** —— 起带调试端口的 Chrome，跑 `fingerprint`，读 verdict → `remediation[]`，附带"信号 → 修法"对照表。
+- **Workflow B** —— 固定的流水线顺序（`packer-unpack` → `string-array-inline` → `strip-debugger` → `pretty`），以及 `decoded: 0` 意味着什么。
+- **Workflow C** —— 用 CDP 截 PNG，`slider` → `travelDistance` → `generateTrack` → `toCdpEvents` → `Input.dispatchMouseEvent`。
+- **Workflow D** —— 把 `HostLimiter.observe()` 接进 fetch 循环。
+
+装到 Agent 会去找的位置：
+
+```bash
+# DeepSeek Harness / dsh（DSH_HOME 默认 ~/.dsh）
+mkdir -p "$DSH_HOME/skills/anticrawl-kit"
+cp skill/SKILL.md "$DSH_HOME/skills/anticrawl-kit/SKILL.md"
+
+# Claude Code（项目内或 ~/.claude/skills/）
+mkdir -p .claude/skills/anticrawl-kit
+cp skill/SKILL.md .claude/skills/anticrawl-kit/SKILL.md
+```
+
+`name:` 字段（`anticrawl-kit`）就是技能 id。装完之后，跟 Agent 说"看看这个站为什么觉得我是机器人"，它会加载技能、用正确的参数跑 `fingerprint`，而不是自己现写一个 puppeteer 脚本。
+
+如果你的环境不支持技能，直接把 `skill/SKILL.md` 整篇贴进对话当提示词用 —— 它是按可独立使用写的。
 
 ## 技术栈
 
@@ -54,6 +202,7 @@ AntiCrawlKit/
 |  |  +- solve.mjs          # CDP 截图 -> 解码 -> 找缺口 -> 拖动
 |  +- rate/bucket.mjs       # TokenBucket、HostLimiter（AIMD）、退避
 +- tests/                   # node --test，完全离线
++- demo/                    # 一个真实的 obfuscator.io 风格样本，用来试命令
 +- docs/                    # 架构、验证记录、交接
 \- skill/SKILL.md           # 面向 Agent 的封装（复制进 DSH 技能目录）
 ```
@@ -156,7 +305,7 @@ verify-ai-project -Path 'D:\AIProjects\DeepSeek Harness\AntiCrawlKit'
 - `webcrack` 支持嵌套解码（两遍内联）。
 - 在现有识别的基础上补 JSFuck/Aaencode/JSJiami 解码器。
 - 可选的 `types/index.d.ts`。
-- `fingerprint` 对比模式：把两次快照（有头 vs 无头）合成一张“变了什么”的表。
+- `fingerprint` 对比模式：把两次快照（有头 vs 无头）合成一张"变了什么"的表。
 
 ## 交接说明
 
